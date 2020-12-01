@@ -1,8 +1,25 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:ngens/models/user.dart';
+import 'package:ngens/pages/activity_feed.dart';
+import 'package:ngens/pages/create_account.dart';
+import 'package:ngens/pages/profile.dart';
+import 'package:ngens/pages/search.dart';
+import 'package:ngens/pages/upload.dart';
 
 final GoogleSignIn googleSignIn = GoogleSignIn();
+final StorageReference storageRef = FirebaseStorage.instance.ref();
+final usersRef = FirebaseFirestore.instance.collection('users');
+final postsRef = FirebaseFirestore.instance.collection('posts');
+final commentsRef = FirebaseFirestore.instance.collection('comments');
+final activityFeedRef = FirebaseFirestore.instance.collection('feed');
+final followersRef = FirebaseFirestore.instance.collection('followers');
+final followingRef = FirebaseFirestore.instance.collection('following');
+final DateTime timestamp = DateTime.now();
+User currentUser;
 
 class Home extends StatefulWidget {
   @override
@@ -12,9 +29,14 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   bool isAuth = false;
 
+  PageController pageController;
+
+  int pageIndex = 0;
+
   @override
   void initState() {
     super.initState();
+    pageController = PageController();
     // Detects when user signed in
     googleSignIn.onCurrentUserChanged.listen((account) {
       handleSignIn(account);
@@ -29,9 +51,20 @@ class _HomeState extends State<Home> {
     });
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return isAuth ? buildAuthScreen() : buildUnAuthScreen();
+  }
+
+  @override
+  void dispose() {
+    pageController.dispose();
+    super.dispose();
+  }
+
   handleSignIn(GoogleSignInAccount account) {
     if (account != null) {
-      print('User signed in!: $account');
+      createUserInFirestore();
       setState(() {
         isAuth = true;
       });
@@ -39,6 +72,40 @@ class _HomeState extends State<Home> {
       setState(() {
         isAuth = false;
       });
+    }
+  }
+
+  createUserInFirestore() async {
+    try {
+      // 1) check if user exists in users collection in database (according to their id)
+      final GoogleSignInAccount user = googleSignIn.currentUser;
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.id)
+          .get();
+
+      if (!doc.exists) {
+        // 2) if the user doesn't exist, then we want to take them to the create account page
+        final username = await Navigator.push(
+            context, MaterialPageRoute(builder: (context) => CreateAccount()));
+
+        // 3) get username from create account, use it to make new user document in users collection
+        usersRef.doc(user.id).set({
+          "id": user.id,
+          "username": username,
+          "photoUrl": user.photoUrl,
+          "email": user.email,
+          "displayName": user.displayName,
+          "bio": "",
+          "timestamp": timestamp
+        });
+
+        doc = await usersRef.doc(user.id).get();
+      }
+
+      currentUser = User.fromDocument(doc);
+    } catch (e) {
+      throw e;
     }
   }
 
@@ -50,10 +117,51 @@ class _HomeState extends State<Home> {
     googleSignIn.signOut();
   }
 
-  Widget buildAuthScreen() {
-    return RaisedButton(
-      child: Text('Logout'),
-      onPressed: logout,
+  onPageChanged(int pageIndex) {
+    setState(() {
+      this.pageIndex = pageIndex;
+    });
+  }
+
+  onTap(int pageIndex) {
+    pageController.animateToPage(pageIndex,
+        duration: Duration(milliseconds: 300), curve: Curves.easeInOut);
+  }
+
+  Scaffold buildAuthScreen() {
+    return Scaffold(
+      body: PageView(
+        children: <Widget>[
+          // Timeline(),
+          RaisedButton(
+            child: Text('Logout'),
+            onPressed: logout,
+          ),
+          ActivityFeed(),
+          Upload(currentUser: currentUser),
+          Search(),
+          Profile(profileId: currentUser?.id),
+        ],
+        controller: pageController,
+        onPageChanged: onPageChanged,
+        physics: NeverScrollableScrollPhysics(),
+      ),
+      bottomNavigationBar: CupertinoTabBar(
+        currentIndex: this.pageIndex,
+        onTap: onTap,
+        activeColor: Theme.of(context).primaryColor,
+        items: [
+          BottomNavigationBarItem(icon: Icon(Icons.whatshot)),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications_active)),
+          BottomNavigationBarItem(
+              icon: Icon(
+            Icons.event,
+            size: 35.0,
+          )),
+          BottomNavigationBarItem(icon: Icon(Icons.book_online)),
+          BottomNavigationBarItem(icon: Icon(Icons.account_circle)),
+        ],
+      ),
     );
   }
 
@@ -76,9 +184,9 @@ class _HomeState extends State<Home> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Text(
-              'We Spark',
+              'Smriti',
               style: TextStyle(
-                fontFamily: "Signatra",
+                fontFamily: "Roboto",
                 fontSize: 90.0,
                 color: Colors.white,
               ),
@@ -102,10 +210,5 @@ class _HomeState extends State<Home> {
         ),
       ),
     );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return isAuth ? buildAuthScreen() : buildUnAuthScreen();
   }
 }
